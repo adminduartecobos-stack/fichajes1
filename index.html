@@ -365,6 +365,12 @@ function render() {
   if(cl) clockTick=setInterval(()=>{const e=document.getElementById('live-clock');if(e)e.textContent=fmt(new Date());else clearInterval(clockTick);},1000);
 }
 
+// Listener global PDF — se registra UNA sola vez al cargar la página
+document.addEventListener('click', function(e) {
+  if(e.target && e.target.id==='btn-download-pdf')       downloadPDF(S.reportData, S.reportMonth, false);
+  if(e.target && e.target.id==='btn-download-pdf-admin') downloadPDF(S.reportData, S.reportMonth, true);
+});
+
 function buildApp() {
   if(S.view==='login')      return buildLogin();
   if(S.view==='changepass') return buildChangePass();
@@ -1083,13 +1089,9 @@ function attachEvents() {
   on('btn-new-correction','click',()=>{S.modal={type:'newCorrection'};render();});
   on('btn-save-correction','click',doSaveCorrection);
 
-  // Informes PDF — delegación de eventos para botones que aparecen tras generar
+  // Informes PDF
   on('btn-gen-report','click',doGenReportEmp);
   on('btn-gen-report-admin','click',doGenReportAdmin);
-  document.addEventListener('click', function(e) {
-    if(e.target && e.target.id==='btn-download-pdf')       downloadPDF(S.reportData, S.reportMonth, false);
-    if(e.target && e.target.id==='btn-download-pdf-admin') downloadPDF(S.reportData, S.reportMonth, true);
-  }, false);
 
   // Modal historial empleado — filtro mes/año
   on('btn-modal-filter','click',()=>{
