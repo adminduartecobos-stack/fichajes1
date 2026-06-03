@@ -1230,25 +1230,56 @@ async function doSaveCorrection() {
   S.modal=null;toast('success','Solicitud de corrección enviada.');render();
 }
 
-async function doGenReportEmp() {
+function buildReportFromRecords(userId, year, month) {
+  const prefix = `${year}-${String(month).padStart(2,'0')}`;
+  const targets = userId
+    ? [S.employees.find(e=>e.id===userId)||{id:userId,name:S.user.name,dept:S.user.dept||'—'}]
+    : S.employees.length ? S.employees : [{id:S.user.id,name:S.user.name,dept:S.user.dept||'—'}];
+
+  return targets.map(emp => {
+    const recs = S.records.filter(r=>r.userId===emp.id && r.date.startsWith(prefix));
+    const byDay = {};
+    recs.forEach(r=>{ if(!byDay[r.date]) byDay[r.date]=[]; byDay[r.date].push(r); });
+    let totalMins = 0;
+    const days = {};
+    Object.entries(byDay).forEach(([date,dr])=>{
+      dr.sort((a,b)=>a.time.localeCompare(b.time));
+      let entry=null, dayMins=0;
+      dr.forEach(r=>{
+        const [h,m]=r.time.split(':').map(Number), t=h*60+m;
+        if(r.type==='entry'||r.type==='resume') entry=t;
+        if((r.type==='pause'||r.type==='exit')&&entry!==null){dayMins+=t-entry;entry=null;}
+      });
+      totalMins+=dayMins;
+      days[date]={hours:Math.floor(dayMins/60),minutes:dayMins%60,records:dr.map(r=>({type:r.type,time:r.time}))};
+    });
+    return {
+      userId:emp.id, name:emp.name||emp.nombre, dept:emp.dept||emp.departamento||'—',
+      totalMins, totalHours:Math.floor(totalMins/60), totalMinutes:totalMins%60,
+      daysWorked:Object.keys(days).length, days
+    };
+  });
+}
+
+function doGenReportEmp() {
   const month=val('report-month'),year=val('report-year');
   if(!month||!year) return;
-  const btn=document.getElementById('btn-gen-report');
-  if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Generando...';}
-  const res=await api('getMonthlyReport',{userId:S.user.id,role:'employee',year:parseInt(year),month:parseInt(month)});
-  if(res.error){toast('danger',res.error);}
-  else{S.reportData=res.report;S.reportMonth=res.month;}
+  const prefix=`${year}-${String(parseInt(month)).padStart(2,'0')}`;
+  const report=buildReportFromRecords(S.user.id, year, parseInt(month));
+  if(!report.length||!Object.keys(report[0].days).length){
+    toast('warn','No hay fichajes en este período.');return;
+  }
+  S.reportData=report; S.reportMonth=prefix;
   render();
 }
 
-async function doGenReportAdmin() {
+function doGenReportAdmin() {
   const month=val('report-month'),year=val('report-year'),empId=val('report-emp');
   if(!month||!year) return;
-  const btn=document.getElementById('btn-gen-report-admin');
-  if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Generando...';}
-  const res=await api('getMonthlyReport',{userId:empId||null,role:'admin',year:parseInt(year),month:parseInt(month)});
-  if(res.error){toast('danger',res.error);}
-  else{S.reportData=res.report;S.reportMonth=res.month;}
+  const prefix=`${year}-${String(parseInt(month)).padStart(2,'0')}`;
+  const report=buildReportFromRecords(empId||null, year, parseInt(month));
+  if(!report.length){toast('warn','No hay fichajes en este período.');return;}
+  S.reportData=report; S.reportMonth=prefix;
   render();
 }
 
