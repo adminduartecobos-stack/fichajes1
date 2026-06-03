@@ -707,6 +707,7 @@ function buildAdminEmployees() {
   const total=S.employees.length;
   const working=S.employees.filter(e=>getShiftStatus(e.id)==='working').length;
   const paused=S.employees.filter(e=>getShiftStatus(e.id)==='paused').length;
+  const today=todayStr();
   return `<div class="animate">
     <div class="flex-between mb16">
       <div><h2>Empleados</h2><p class="text-muted">${total} en el sistema</p></div>
@@ -722,13 +723,20 @@ function buildAdminEmployees() {
     S.employees.map(e=>{
       const st=getShiftStatus(e.id);
       const stC={working:{cls:'badge-success',lbl:'Trabajando'},paused:{cls:'badge-warn',lbl:'En pausa'},out:{cls:'badge-gray',lbl:'Inactivo'}}[st]||{cls:'badge-gray',lbl:'—'};
+      // Hora de entrada real de hoy (primer 'entry' del día)
+      const entryRec = S.records
+        .filter(r=>r.userId===e.id && r.date===today && r.type==='entry')
+        .sort((a,b)=>a.time.localeCompare(b.time))[0];
+      const entradaHoy = entryRec
+        ? `<span style="color:var(--success)">Entró a las ${entryRec.time}</span>`
+        : `<span style="color:var(--text3)">Horario: ${e.horaEntrada||'09:00'}</span>`;
       return `<div class="card2 flex-between">
         <div class="flex gap12">
           <div class="avatar" style="width:40px;height:40px;font-size:14px">${initials(e.name)}</div>
           <div>
             <p style="font-weight:600;font-size:14px">${e.name}</p>
             <p class="text-sm" style="color:var(--text2)">${e.email} · ${e.dept}</p>
-            <p class="text-sm" style="color:var(--text3);margin-top:2px">Entrada: ${e.horaEntrada||'09:00'}</p>
+            <p class="text-sm" style="margin-top:2px">${entradaHoy}</p>
             ${e.mustChangePass?`<span class="badge badge-warn" style="margin-top:4px;font-size:11px">⚠ Pendiente cambio de clave</span>`:''}
           </div>
         </div>
@@ -953,24 +961,56 @@ function buildModalDelete() {
   </div></div>`;
 }
 
+function calcEmpMonthStats(recs, year, month) {
+  const prefix = `${year}-${String(month).padStart(2,'0')}`;
+  const monthRecs = recs.filter(r => r.date && r.date.startsWith(prefix));
+  const byDay = {};
+  monthRecs.forEach(r => { if(!byDay[r.date]) byDay[r.date]=[]; byDay[r.date].push(r); });
+  let totalMins = 0;
+  Object.values(byDay).forEach(dr => {
+    dr.sort((a,b) => a.time.localeCompare(b.time));
+    let entry = null;
+    dr.forEach(r => {
+      const [h,m] = r.time.split(':').map(Number), t = h*60+m;
+      if(r.type==='entry'||r.type==='resume') entry = t;
+      if((r.type==='pause'||r.type==='exit') && entry!==null){ totalMins += t-entry; entry=null; }
+    });
+  });
+  return { hours: Math.floor(totalMins/60), mins: totalMins%60, days: Object.keys(byDay).length, recs: monthRecs };
+}
+
 function buildModalEmpHistory() {
-  const emp=S.employees.find(e=>e.id===S.modal.empId)||{name:'Empleado',dept:''};
-  const recs=S.modal.recs||[];
-  const mh=S.modal.monthHours||0, mm=S.modal.monthMins||0, md=S.modal.monthDays||0;
+  const emp = S.employees.find(e=>e.id===S.modal.empId)||{name:'Empleado',dept:''};
+  const allRecs = S.modal.recs||[];
+  const now = new Date();
+  const selYear  = S.modal.selYear  || now.getFullYear();
+  const selMonth = S.modal.selMonth || (now.getMonth()+1);
+  const { hours, mins, days, recs } = calcEmpMonthStats(allRecs, selYear, selMonth);
+
+  const yearOptions = [now.getFullYear()-1, now.getFullYear()].map(y =>
+    `<option value="${y}" ${y===selYear?'selected':''}>${y}</option>`).join('');
+  const monthOptions = MONTHS_ES.map((m,i) =>
+    `<option value="${i+1}" ${i+1===selMonth?'selected':''}>${m}</option>`).join('');
+
   return `<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-width:720px;max-height:85vh;overflow-y:auto">
     <div class="flex-between mb16">
       <div class="flex gap10">
         <div class="avatar" style="width:38px;height:38px">${initials(emp.name)}</div>
-        <div><p style="font-weight:700">${emp.name}</p><p class="text-sm text-muted">${emp.dept} · ${recs.length} fichajes</p></div>
+        <div><p style="font-weight:700">${emp.name}</p><p class="text-sm text-muted">${emp.dept} · ${allRecs.length} fichajes totales</p></div>
       </div>
       <button class="btn btn-ghost btn-sm" id="btn-close-modal">✕</button>
     </div>
-    <div class="grid-stats mb16" style="grid-template-columns:repeat(3,1fr)">
-      <div class="stat-card"><div class="stat-label">Horas este mes</div><div class="stat-val">${mh}h ${String(mm).padStart(2,'0')}m</div></div>
-      <div class="stat-card"><div class="stat-label">Días trabajados</div><div class="stat-val">${md}</div></div>
-      <div class="stat-card"><div class="stat-label">Total fichajes</div><div class="stat-val">${recs.length}</div></div>
+    <div class="flex gap8 mb16" style="flex-wrap:wrap">
+      <select class="input-field" id="modal-sel-month" style="width:150px;padding:8px 12px;font-size:13px">${monthOptions}</select>
+      <select class="input-field" id="modal-sel-year"  style="width:100px;padding:8px 12px;font-size:13px">${yearOptions}</select>
+      <button class="btn btn-accent btn-sm" id="btn-modal-filter">Ver período</button>
     </div>
-    <div class="table-wrap">${buildRecordsTable(recs)}</div>
+    <div class="grid-stats mb16" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat-card"><div class="stat-label">Horas — ${MONTHS_ES[selMonth-1]} ${selYear}</div><div class="stat-val">${hours}h ${String(mins).padStart(2,'0')}m</div></div>
+      <div class="stat-card"><div class="stat-label">Días trabajados</div><div class="stat-val">${days}</div></div>
+      <div class="stat-card"><div class="stat-label">Fichajes en período</div><div class="stat-val">${recs.length}</div></div>
+    </div>
+    <div class="table-wrap">${buildRecordsTable(recs.length ? recs : allRecs)}</div>
   </div></div>`;
 }
 
@@ -1043,11 +1083,20 @@ function attachEvents() {
   on('btn-new-correction','click',()=>{S.modal={type:'newCorrection'};render();});
   on('btn-save-correction','click',doSaveCorrection);
 
-  // Informes PDF
+  // Informes PDF — delegación de eventos para botones que aparecen tras generar
   on('btn-gen-report','click',doGenReportEmp);
-  on('btn-download-pdf','click',()=>downloadPDF(S.reportData, S.reportMonth, false));
   on('btn-gen-report-admin','click',doGenReportAdmin);
-  on('btn-download-pdf-admin','click',()=>downloadPDF(S.reportData, S.reportMonth, true));
+  document.addEventListener('click', function(e) {
+    if(e.target && e.target.id==='btn-download-pdf')       downloadPDF(S.reportData, S.reportMonth, false);
+    if(e.target && e.target.id==='btn-download-pdf-admin') downloadPDF(S.reportData, S.reportMonth, true);
+  }, false);
+
+  // Modal historial empleado — filtro mes/año
+  on('btn-modal-filter','click',()=>{
+    const m=document.getElementById('modal-sel-month');
+    const y=document.getElementById('modal-sel-year');
+    if(m&&y){ S.modal.selMonth=parseInt(m.value); S.modal.selYear=parseInt(y.value); render(); }
+  });
 
   // Cerrar modals
   ['btn-close-modal','btn-close-modal2'].forEach(id=>on(id,'click',()=>{S.modal=null;render();}));
@@ -1146,23 +1195,15 @@ async function doDeleteEmployee() {
 
 async function doViewEmpHistory(empId) {
   toast('info','Cargando historial...');
-  const res=await api('getAllRecords',{filterUserId:empId});
-  const now=new Date();
-  const monthPrefix=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  const monthRecs=(res.records||[]).filter(r=>r.date&&r.date.startsWith(monthPrefix));
-  let totalMins=0;
-  const byDay={};
-  monthRecs.forEach(r=>{if(!byDay[r.date])byDay[r.date]=[];byDay[r.date].push(r);});
-  Object.values(byDay).forEach(dr=>{
-    dr.sort((a,b)=>a.time.localeCompare(b.time));
-    let entry=null;
-    dr.forEach(r=>{
-      const [h,m]=r.time.split(':').map(Number),t=h*60+m;
-      if(r.type==='entry'||r.type==='resume') entry=t;
-      if((r.type==='pause'||r.type==='exit')&&entry!==null){totalMins+=t-entry;entry=null;}
-    });
-  });
-  S.modal={type:'viewEmpHistory',empId,recs:res.ok?res.records:[],monthHours:Math.floor(totalMins/60),monthMins:totalMins%60,monthDays:Object.keys(byDay).length};
+  const res = await api('getAllRecords',{filterUserId:empId});
+  const now = new Date();
+  S.modal = {
+    type: 'viewEmpHistory',
+    empId,
+    recs: res.ok ? res.records : [],
+    selYear:  now.getFullYear(),
+    selMonth: now.getMonth()+1
+  };
   render();
 }
 
