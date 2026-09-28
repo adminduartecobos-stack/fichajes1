@@ -460,48 +460,52 @@ function render() {
   if(cl) clockTick=setInterval(()=>{const e=document.getElementById('live-clock');if(e)e.textContent=fmt(new Date());else clearInterval(clockTick);},1000);
 }
 
-
 function descargarHorasPDF(empName, year, month, stats) {
   if(!stats.count){toast("warn","No hay datos para generar el PDF");return;}
   var jsPDFLib = window.jspdf;
   if(!jsPDFLib){toast("danger","Librería PDF no cargada");return;}
   var doc = new jsPDFLib.jsPDF();
   var monthName = MONTHS_ES[month-1];
-  doc.setFillColor(26,26,46);
-  doc.rect(0,0,210,35,"F");
-  doc.setTextColor(167,139,250);
-  doc.setFontSize(20);
+
+  // Cabecera sin relleno: solo texto y una línea fina
+  doc.setTextColor(0,0,0);
+  doc.setFontSize(18);
   doc.setFont("helvetica","bold");
   doc.text("FichajesPro",14,18);
-  doc.setTextColor(255,255,255);
   doc.setFontSize(11);
   doc.setFont("helvetica","normal");
-  doc.text("Informe de horas · "+monthName+" "+year,14,28);
-  var y2=50;
+  doc.text("Informe de horas · "+monthName+" "+year,14,26);
+  doc.setDrawColor(120,120,120);
+  doc.setLineWidth(0.4);
+  doc.line(14,30,196,30);
+
+  var y2=42;
   doc.setFontSize(14);
   doc.setFont("helvetica","bold");
-  doc.setTextColor(30,30,60);
+  doc.setTextColor(0,0,0);
   doc.text(empName,14,y2); y2+=8;
   doc.setFontSize(10);
   doc.setFont("helvetica","normal");
-  doc.setTextColor(100,100,130);
+  doc.setTextColor(70,70,70);
   doc.text(stats.totalH+"h "+String(stats.totalM).padStart(2,"0")+"m totales · "+stats.count+" días trabajados",14,y2); y2+=12;
-  doc.setFillColor(26,26,46);
-  doc.rect(14,y2,182,8,"F");
-  doc.setTextColor(255,255,255);
+
+  // Cabecera de tabla: texto en negrita y línea debajo, sin fondo
+  doc.setTextColor(0,0,0);
   doc.setFontSize(8);
   doc.setFont("helvetica","bold");
   doc.text("FECHA",18,y2+5.5);
   doc.text("HORAS",80,y2+5.5);
   doc.text("FICHAJES",130,y2+5.5);
+  doc.setDrawColor(120,120,120);
+  doc.setLineWidth(0.4);
+  doc.line(14,y2+8,196,y2+8);
   y2+=8;
+
   var dates=Object.keys(stats.days).sort();
-  dates.forEach(function(d,i){
+  dates.forEach(function(d){
     var day=stats.days[d];
     if(y2>270){doc.addPage();y2=20;}
-    doc.setFillColor(i%2===0?250:255,i%2===0?250:255,255);
-    doc.rect(14,y2,182,8,"F");
-    doc.setTextColor(50,50,80);
+    doc.setTextColor(30,30,30);
     doc.setFontSize(9);
     doc.setFont("helvetica","normal");
     doc.text(fmtDate(d),18,y2+5.5);
@@ -511,29 +515,29 @@ function descargarHorasPDF(empName, year, month, stats) {
     doc.setFontSize(8);
     var fichajes=day.recs.map(function(r){return (typeLabel[r.type]||r.type)+" "+r.time;}).join(" · ");
     doc.text(fichajes,130,y2+5.5);
+    // separador muy fino en lugar de filas coloreadas
+    doc.setDrawColor(210,210,210);
+    doc.setLineWidth(0.1);
+    doc.line(14,y2+8,196,y2+8);
     y2+=8;
   });
+
   y2+=15;
-  doc.setDrawColor(200,200,220);
+  doc.setDrawColor(120,120,120);
+  doc.setLineWidth(0.3);
   doc.line(14,y2,100,y2); y2+=5;
   doc.setFontSize(8);
-  doc.setTextColor(150,150,180);
+  doc.setTextColor(70,70,70);
   doc.text("Firma del empleado",14,y2);
   doc.line(110,y2-5,196,y2-5);
   doc.text("Firma del responsable",110,y2);
-  y2+=20;
+
   doc.setFontSize(7);
-  doc.setTextColor(180,180,200);
+  doc.setTextColor(110,110,110);
   doc.text("Generado por FichajesPro · "+new Date().toLocaleDateString("es-ES")+" · Ley 10/2021 · RDL 8/2019",105,290,{align:"center"});
   doc.save("horas_"+empName.replace(/ /g,"_")+"_"+year+"-"+String(month).padStart(2,"0")+".pdf");
   toast("success","PDF descargado correctamente.");
 }
-// Listener global PDF — se registra UNA sola vez al cargar la página
-document.addEventListener('click', function(e) {
-  if(e.target && e.target.id==='btn-download-pdf')       downloadPDF(S.reportData, S.reportMonth, false);
-  if(e.target && e.target.id==='btn-download-pdf-admin') downloadPDF(S.reportData, S.reportMonth, true);
-});
-
 function buildApp() {
   if(S.view==='login')      return buildLogin();
   if(S.view==='changepass') return buildChangePass();
