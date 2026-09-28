@@ -2,7 +2,8 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://script.google.com https://script.googleusercontent.com; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://script.google.com https://script.googleusercontent.com; img-src 'self' data:; base-uri 'none'; form-action 'none'">
 <title>FichajesPro</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -266,16 +267,41 @@ let S = {
   reportData: null, reportMonth: '', reportYear: '',
 };
 
+// ---------- Seguridad: escapado ----------
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function unesc(s){return String(s==null?'':s).replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}
+function deepEsc(v){
+  if(typeof v==='string') return esc(v);
+  if(Array.isArray(v)) return v.map(deepEsc);
+  if(v&&typeof v==='object'){var o={};for(var k in v)o[k]=deepEsc(v[k]);return o;}
+  return v;
+}
+// Los PDF deben mostrar el texto real, no las entidades HTML
+if(window.jspdf&&window.jspdf.jsPDF){
+  var _pdfText=window.jspdf.jsPDF.prototype.text;
+  window.jspdf.jsPDF.prototype.text=function(){
+    var a=Array.prototype.slice.call(arguments);
+    if(typeof a[0]==='string') a[0]=unesc(a[0]);
+    return _pdfText.apply(this,a);
+  };
+}
+
+// ---------- API: token de sesión + respuestas escapadas ----------
 async function api(action, data={}) {
   try {
     const res = await fetch(SCRIPT_URL, {
       method: 'POST',
       redirect: 'follow',
-      body: JSON.stringify({action, data})
+      body: JSON.stringify({action, data, token: S.token})
     });
-    const text = await res.text();
-    return JSON.parse(text);
-  } catch(e) { return {error:'Error de conexión: '+e.message}; }
+    const r = deepEsc(JSON.parse(await res.text()));
+    if(r && r.error==='Sesión no válida' && S.view!=='login'){
+      S={...S,user:null,token:null,view:'login',records:[],corrections:[],employees:[],modal:null,
+         alert:{type:'danger',msg:'Sesión caducada. Vuelve a entrar.'}};
+      render();
+    }
+    return r;
+  } catch(e) { return {error:'Error de conexión'}; }
 }
 
 // UTILS
@@ -1053,7 +1079,7 @@ function buildModalAddEmp() {
     <div class="input-group"><label>Email corporativo *</label><input class="input-field" type="email" id="m-email" placeholder="ana@empresa.com"></div>
     <div class="input-group"><label>Departamento *</label><input class="input-field" id="m-dept" placeholder="Marketing, Ventas..."></div>
     <div class="input-group"><label>Hora de entrada</label><input class="input-field" type="time" id="m-hora" value="09:00"></div>
-    <div class="alert alert-info">Contraseña temporal: <code>Fichar2024</code></div>
+    <div class="alert alert-info">Se generará una contraseña temporal y se mostrará una sola vez.</div>
     <div class="flex gap8" style="justify-content:flex-end;margin-top:4px">
       <button class="btn btn-ghost" id="btn-close-modal2">Cancelar</button>
       <button class="btn btn-primary" id="btn-save-employee">Añadir empleado</button>
@@ -1184,7 +1210,7 @@ function attachEvents() {
   onKey('login-email','Enter',()=>document.getElementById('login-pass')?.focus());
   on('btn-changepass','click',doChangePass);
   onKey('new-pass2','Enter',doChangePass);
-  on('btn-logout','click',()=>{S={...S,user:null,view:'login',records:[],corrections:[],employees:[],alert:null,modal:null,reportData:null};render();});
+  on('btn-logout','click',()=>{api('logout');S={...S,user:null,token:null,view:'login',records:[],corrections:[],employees:[],alert:null,modal:null,reportData:null};render();});
 
   // Sección Horas — filtro y PDF
   on('btn-horas-filtrar','click',function(){
@@ -1238,7 +1264,7 @@ function attachEvents() {
   on('btn-update-employee','click',doUpdateEmployee);
   qsa('[data-edit-emp]').forEach(el=>el.addEventListener('click',()=>{S.modal={type:'editEmployee',empId:el.dataset.editEmp};render();}));
   qsa('[data-view-emp]').forEach(el=>el.addEventListener('click',()=>doViewEmpHistory(el.dataset.viewEmp)));
-  qsa('[data-del-emp]').forEach(el=>el.addEventListener('click',()=>{S.modal={type:'confirmDelete',empId:el.dataset.delEmp,empName:el.dataset.delName};render();}));
+  qsa('[data-del-emp]').forEach(el=>el.addEventListener('click',()=>{S.modal={type:'confirmDelete',empId:el.dataset.delEmp,empName:esc(el.dataset.delName)};render();}));
   on('btn-confirm-delete','click',doDeleteEmployee);
 
   // Correcciones
@@ -1263,7 +1289,7 @@ function attachEvents() {
   on('btn-close-location','click',()=>{S.locationModal=null;render();});
   const ov=qs('#modal-overlay');if(ov)ov.addEventListener('click',e=>{if(e.target===ov){S.modal=null;render();}});
   const lv=qs('#loc-overlay');if(lv)lv.addEventListener('click',e=>{if(e.target===lv){S.locationModal=null;render();}});
-  qsa('.loc-btn').forEach(el=>el.addEventListener('click',()=>{S.locationModal={lat:el.dataset.lat,lng:el.dataset.lng,address:el.dataset.addr};render();}));
+  qsa('.loc-btn').forEach(el=>el.addEventListener('click',()=>{S.locationModal={lat:esc(el.dataset.lat),lng:esc(el.dataset.lng),address:esc(el.dataset.addr)};render();}));
 }
 
 // ===================== ACTIONS =====================
@@ -1274,7 +1300,7 @@ async function doLogin() {
   if(!email||!pass){S.alert={type:'danger',msg:'Introduce email y contraseña.'};render();return;}
   const res=await api('login',{email,password:pass});
   if(res.error){S.alert={type:'danger',msg:res.error};render();return;}
-  S.user=res.user;S.alert=null;
+  S.user=res.user;S.token=res.token;S.alert=null;
   if(S.user.mustChangePass){S.view='changepass';render();return;}
   await loadUserData();
   S.view='app';render();
@@ -1327,8 +1353,9 @@ async function doAddEmployee() {
   if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Guardando...';}
   const res=await api('addEmployee',{name,email,dept,horaEntrada:horaEntrada||'09:00'});
   if(res.error){S.modal.error=res.error;render();return;}
-  S.employees.push({id:res.id,name,email,dept,horaEntrada:horaEntrada||'09:00',mustChangePass:true});
-  S.modal=null;toast('success',`Empleado ${name} añadido correctamente.`);render();
+  S.employees.push({id:res.id,name:esc(name),email:esc(email),dept:esc(dept),horaEntrada:horaEntrada||'09:00',mustChangePass:true});
+  S.modal=null;render();
+  toast('info','Contraseña temporal de '+esc(name)+': <code>'+res.tempPassword+'</code> — anótala, no se volverá a mostrar.',60000);
 }
 
 async function doUpdateEmployee() {
@@ -1339,7 +1366,7 @@ async function doUpdateEmployee() {
   const res=await api('updateEmployee',{userId:empId,name,email,dept,horaEntrada});
   if(res.error){S.modal.error=res.error;render();return;}
   const emp=S.employees.find(e=>e.id===empId);
-  if(emp){emp.name=name||emp.name;emp.email=email||emp.email;emp.dept=dept||emp.dept;emp.horaEntrada=horaEntrada||emp.horaEntrada;}
+  if(emp){emp.name=esc(name)||emp.name;emp.email=esc(email)||emp.email;emp.dept=esc(dept)||emp.dept;emp.horaEntrada=esc(horaEntrada)||emp.horaEntrada;}
   S.modal=null;toast('success','Empleado actualizado correctamente.');render();
 }
 
@@ -1384,7 +1411,7 @@ async function doSaveCorrection() {
   if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Enviando...';}
   const res=await api('addCorrection',{userId:S.user.id,userName:S.user.name,date,description:desc,startTime,endTime});
   if(res.error){S.modal.error=res.error;render();return;}
-  S.corrections.unshift({id:res.id,userId:S.user.id,date,description:desc,status:'pending',adminNote:'',createdAt:new Date().toISOString()});
+  S.corrections.unshift({id:res.id,userId:S.user.id,date,description:esc(desc),status:'pending',adminNote:'',createdAt:new Date().toISOString()});
   S.modal=null;toast('success','Solicitud de corrección enviada.');render();
 }
 
@@ -1569,6 +1596,5 @@ function exportCSV() {
 
 render();
 </script>
-<script src="patch.js"></script>
 </body>
 </html>
